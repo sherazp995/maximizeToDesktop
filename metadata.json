@@ -1,0 +1,15 @@
+{
+  "KPlugin": {
+    "Id": "maximizeToDesktop",
+    "Name": "Maximize To New Desktop",
+    "Description": "Moves maximized windows to a new desktop, and closes empty desktops (except the first one).",
+    "Icon": "preferences-system-windows",
+    "Version": "1.0",
+    "License": "GPLv3",
+    "EnabledByDefault": false
+  },
+  "X-KDE-PluginInfo-Name": "maximizeToDesktop",
+  "X-Plasma-API": "javascript",
+  "X-Plasma-MainScript": "code/main.js",
+  "KPackageStructure": "KWin/Script"
+}
