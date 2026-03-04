@@ -8,7 +8,8 @@ function isIgnoredWindow(client) {
     var rc = (client.resourceClass || "").toLowerCase();
 
     var ignored = ["lattedock", "latte-dock", "org.kde.spectacle", 'kwin', 'kwin_wayland', 'ksmserver-logout-greeter', 'ksmserver',
-                    'kscreenlocker_greet', 'ksplash', 'ksplashqml', 'plasmashell', 'org.kde.plasmashell', 'krunner'];
+                    'kscreenlocker_greet', 'ksplash', 'ksplashqml', 'plasmashell', 'org.kde.plasmashell', 'krunner',
+                    'xdg-desktop-portal', 'xdg-desktop-portal-kde', 'xdg-desktop-portal-gnome'];
     for (var i = 0; i < ignored.length; i++) {
         var name = ignored[i];
         if (rc.indexOf(name) !== -1) {
@@ -18,10 +19,48 @@ function isIgnoredWindow(client) {
     return false;
 }
 
+// Check if a window is a popup/child that should stay on the current desktop
+function isPopupOrChild(client) {
+    if (!client) return true;
+
+    // Has a parent window — it's a child dialog/popup
+    if (client.transient || client.transientFor) return true;
+
+    // Modal windows (e.g. "Save As", confirmations)
+    if (client.modal) return true;
+
+    // Explicit dialog/popup/utility types
+    if (client.dialog || client.popupWindow || client.utility) return true;
+    if (client.splash || client.dropdownMenu || client.popupMenu || client.comboBox) return true;
+    if (client.tooltip || client.notification || client.criticalNotification) return true;
+    if (client.onScreenDisplay || client.appletPopup || client.dndIcon) return true;
+
+    // Small windows relative to screen are likely dialogs/pickers
+    // (screen sharing picker, file dialogs, color pickers, etc.)
+    try {
+        var area = workspace.clientArea(KWin.MaximizeArea, client);
+        var widthRatio = client.width / area.width;
+        var heightRatio = client.height / area.height;
+        // If window is less than 60% of screen in both dimensions, treat as popup
+        if (widthRatio < 0.6 && heightRatio < 0.6) {
+            print("ℹ️ Small window '" + client.caption + "' (" + Math.round(widthRatio*100) + "x" + Math.round(heightRatio*100) + "%), treating as popup");
+            return true;
+        }
+    } catch (e) {}
+
+    // Check resource class for known dialog-spawning processes
+    var rc = (client.resourceClass || "").toLowerCase();
+    var dialogClasses = ["portal", "pinentry", "polkit", "gcr-prompter", "ssh-askpass"];
+    for (var i = 0; i < dialogClasses.length; i++) {
+        if (rc.indexOf(dialogClasses[i]) !== -1) return true;
+    }
+
+    return false;
+}
+
 // Connect to signals
 try {
     workspace.windowAdded.connect(handleNewClient);
-
     workspace.windowRemoved.connect(handleWindowRemoved);
 } catch (e) {
     print("❌ Error connecting to signals: " + e);
@@ -33,9 +72,6 @@ function handleNewClient(client) {
 
     if (!client ||
         !client.normalWindow ||
-        !client.fullScreenable ||
-        client.dialog ||
-        client.popupWindow ||
         client.specialWindow ||
         client.desktopWindow ||
         client.dock ||
@@ -43,9 +79,7 @@ function handleNewClient(client) {
         client.menu ||
         client.notification ||
         client.appletPopup ||
-        client.popupMenu ||
-        client.utility ||
-        client.transient
+        client.popupMenu
     ) return;
 
     clients.add(client);
@@ -65,14 +99,19 @@ function handleNewClient(client) {
                 handleMinimizeChange(client);
             });
         }
-        
-        if (client.width >= workspace.clientArea(KWin.MaximizeArea, client).width && 
+
+        if (client.width >= workspace.clientArea(KWin.MaximizeArea, client).width &&
             client.height >= workspace.clientArea(KWin.MaximizeArea, client).height) {
             moveToNewDesktop(client);
+        } else if (isPopupOrChild(client)) {
+            // Popups/dialogs/children stay on the CURRENT desktop (don't move them)
+            print("ℹ️ Popup/child window '" + client.caption + "' stays on current desktop");
         } else {
+            // Only independent, non-maximized app windows go to desktop 1
             var firstDesk = workspace.desktops[0];
             client.desktops = [firstDesk];
             workspace.currentDesktop = firstDesk;
+            print("➡️ New app window '" + client.caption + "' moved to desktop 1");
         }
     } catch (e) {
         print("❌ Error connecting to maximize signal: " + e);
@@ -92,7 +131,7 @@ function handleWindowRemoved(client) {
 
 function handleMaximizeChange(client) {
     // Check if window is fully maximized by checking both dimensions
-    if (client.width >= workspace.clientArea(KWin.MaximizeArea, client).width && 
+    if (client.width >= workspace.clientArea(KWin.MaximizeArea, client).width &&
         client.height >= workspace.clientArea(KWin.MaximizeArea, client).height) {
         previousDesktops.set(client, client.desktops?.[0]);
         moveToNewDesktop(client);
@@ -138,11 +177,11 @@ function moveToNewDesktop(client) {
         // Create new desktop after current one
         var newPosition = currentDesktopNumber; // Insert after current desktop
         workspace.createDesktop(newPosition, client.caption);
-        
+
         // Get the newly created desktop from updated desktops list
         desktops = workspace.desktops; // Refresh list
         var newDesktop = desktops[newPosition]; // Get desktop at the position we created
-        
+
         if (newDesktop) {
             // Move window to the new desktop
             client.desktops = [newDesktop];
