@@ -2,6 +2,22 @@
 var previousDesktops = new Map();
 var clients = new Set();
 
+// ignore list helper
+function isIgnoredWindow(client) {
+    if (!client) return true;
+    var rc = (client.resourceClass || "").toLowerCase();
+
+    var ignored = ["lattedock", "latte-dock", "org.kde.spectacle", 'kwin', 'kwin_wayland', 'ksmserver-logout-greeter', 'ksmserver',
+                    'kscreenlocker_greet', 'ksplash', 'ksplashqml', 'plasmashell', 'org.kde.plasmashell', 'krunner'];
+    for (var i = 0; i < ignored.length; i++) {
+        var name = ignored[i];
+        if (rc.indexOf(name) !== -1) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Connect to signals
 try {
     workspace.windowAdded.connect(handleNewClient);
@@ -12,6 +28,9 @@ try {
 }
 
 function handleNewClient(client) {
+    // skip ignored windows (latte dock, spectacle, etc.)
+    if (isIgnoredWindow(client)) return;
+
     if (!client ||
         !client.normalWindow ||
         !client.fullScreenable ||
@@ -63,6 +82,9 @@ function handleNewClient(client) {
 function handleWindowRemoved(client) {
     if (!client || !client.normalWindow) return;
 
+    // ensure ignored windows are not processed
+    if (isIgnoredWindow(client)) return;
+
     clients.delete(client);
     previousDesktops.delete(client);
     cleanupEmptyDesktops();
@@ -105,7 +127,8 @@ function moveToNewDesktop(client) {
         var currentDesktop = workspace.currentDesktop;
         var currentDesktopNumber = currentDesktop.x11DesktopNumber;
         var desktops = workspace.desktops;
-        
+        let _windowId = client.internalId.toString();
+
         // Don't move if already on a higher desktop
         if (client.desktops.length > 0 && client.desktops[0].x11DesktopNumber > currentDesktopNumber) {
             print("ℹ️ Already on desktop " + client.desktops[0].x11DesktopNumber + ", skipping move");
